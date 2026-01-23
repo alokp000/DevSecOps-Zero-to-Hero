@@ -1,11 +1,12 @@
-name: Terraform with Vault
+name: Terraform CI using Vault (OIDC)
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
 
 permissions:
-  id-token: write
+  id-token: write     # REQUIRED for GitHub OIDC
   contents: read
 
 jobs:
@@ -13,36 +14,42 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      # 1. Checkout repository
+      - name: Checkout source code
         uses: actions/checkout@v4
 
-      - name: Install Vault
-        run: |
-          sudo apt update
-          sudo apt install -y vault
+      # 2. Install Vault CLI
+      - name: Setup Vault
+        uses: hashicorp/setup-vault@v2
+        with:
+          vault-version: "1.15.6"
 
-      - name: Authenticate to Vault
+      # 3. Authenticate to Vault using GitHub OIDC
+      - name: Login to Vault
         env:
-          VAULT_ADDR: http://<EC2_PUBLIC_IP>:8200
+          VAULT_ADDR: http://98.82.141.249:8200
         run: |
           vault login -method=jwt \
             role=github-actions \
             jwt=$ACTIONS_ID_TOKEN_REQUEST_TOKEN
 
-      - name: Read AWS creds from Vault
+      # 4. Read AWS credentials from Vault
+      - name: Fetch AWS credentials from Vault
         env:
-          VAULT_ADDR: http://<EC2_PUBLIC_IP>:8200
+          VAULT_ADDR: http://98.82.141.249:8200
         run: |
-          echo "AWS_ACCESS_KEY=$(vault kv get -field=access_key kv/aws)" >> $GITHUB_ENV
-          echo "AWS_SECRET_KEY=$(vault kv get -field=secret_key kv/aws)" >> $GITHUB_ENV
+          echo "TF_VAR_aws_access_key=$(vault kv get -field=access_key kv/aws)" >> $GITHUB_ENV
+          echo "TF_VAR_aws_secret_key=$(vault kv get -field=secret_key kv/aws)" >> $GITHUB_ENV
 
+      # 5. Install Terraform (pinned to latest)
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.4"
 
+      # 6. Terraform Init & Apply
       - name: Terraform Apply
-        env:
-          TF_VAR_aws_access_key: ${{ env.AWS_ACCESS_KEY }}
-          TF_VAR_aws_secret_key: ${{ env.AWS_SECRET_KEY }}
+        working-directory: terraform   # remove if tf files are in repo root
         run: |
           cd terraform
           terraform init
